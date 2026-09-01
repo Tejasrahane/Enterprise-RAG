@@ -1,0 +1,18 @@
+# Environment variables and secrets
+.env
+
+# Python build and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local data storage and databases
+data/storage/
+.chromadb/
+.chroma_db/
+
+# Environments
+.venv/
+venv/
+ENV/
