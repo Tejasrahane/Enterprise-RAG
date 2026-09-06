@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  chroma-vector-db:
+    image: chromadb/chroma:0.6.3
+    volumes:
+      - ./data/storage/chroma_db:/chroma/data
+    environment:
+      - CHROMA_SERVER_AUTH_PROVIDER=
+      - IS_PERSISTENT=TRUE
+    ports:
+      - "8000:8000"
+    restart: always
