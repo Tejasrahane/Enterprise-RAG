@@ -1,4 +1,4 @@
-# ⚡ Enterprise RAG
+# ⚡ Enterprise Async Agentic RAG System
 > **100% Free, Open-Source, and Self-Hosted Retrieval-Augmented Generation Architecture**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
