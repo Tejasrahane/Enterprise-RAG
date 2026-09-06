@@ -330,7 +330,3 @@ You can change models on the fly by updating `.env` or setting environment varia
 | `SEARCH_ENGINE` | `duckduckgo`, `wikipedia` | Primary free web search provider |
 
 ---
-
-## 📄 License
-
-This project is licensed under the **MIT License** - free for both personal and commercial use.
