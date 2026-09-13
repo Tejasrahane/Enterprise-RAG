@@ -1,0 +1,1 @@
+Project Aetheris is a next-generation quantum computing initiative. The Project Aetheris quantum CPU utilizes a 128-qubit topological architecture operating at 15 millikelvin. It achieved a quantum volume of 16,777,216 (2^24) in June 2026.
