@@ -2,8 +2,10 @@
 langchain>=0.3.15
 langgraph>=0.2.65
 langchain-ollama>=0.2.0
+langchain-google-genai>=2.0.0
+google-genai>=0.1.0
 
-# --- Open-Source Embeddings & Vector Infrastructure ---
+# --- Open-Source & Cloud Embeddings & Vector Infrastructure ---
 sentence-transformers>=3.0.0
 chromadb>=0.6.0
 pydantic-settings>=2.7.1

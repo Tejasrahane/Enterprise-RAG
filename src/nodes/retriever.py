@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 import asyncio
@@ -17,6 +18,33 @@ def get_embedder():
     global _embedder
     if _embedder is not None:
         return _embedder
+
+    google_api_key = (
+        settings.GOOGLE_API_KEY or 
+        settings.GEMINI_API_KEY or 
+        os.getenv("GOOGLE_API_KEY") or 
+        os.getenv("GEMINI_API_KEY") or 
+        ""
+    ).strip()
+
+    # Cloud Google GenAI Embeddings (zero server RAM/GPU compute needed)
+    if settings.EMBEDDING_PROVIDER == "gemini" or (google_api_key and settings.EMBEDDING_PROVIDER != "local"):
+        try:
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            class GoogleEmbedderWrapper:
+                def __init__(self, model_name: str, api_key: str):
+                    if api_key:
+                        self.client = GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=api_key)
+                    else:
+                        self.client = GoogleGenerativeAIEmbeddings(model=model_name)
+                def encode(self, texts: List[str], convert_to_numpy: bool = True):
+                    return self.client.embed_documents(texts)
+            _embedder = GoogleEmbedderWrapper(settings.GEMINI_EMBEDDING_MODEL, google_api_key)
+            logger.info(f"Loaded Google GenAI Cloud Embeddings: '{settings.GEMINI_EMBEDDING_MODEL}'")
+            return _embedder
+        except Exception as e:
+            logger.warning(f"Could not load Google GenAI Embeddings: {e}. Falling back to SentenceTransformers.")
+
     try:
         from sentence_transformers import SentenceTransformer
         _embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
@@ -76,7 +104,8 @@ def query_chroma(query: str, k: int = 2) -> List[str]:
     
     if embedder is not None:
         try:
-            query_vector = embedder.encode([query], convert_to_numpy=True).tolist()
+            raw_query_vector = embedder.encode([query], convert_to_numpy=True)
+            query_vector = raw_query_vector.tolist() if hasattr(raw_query_vector, "tolist") else raw_query_vector
             
             results = collection.query(
                 query_embeddings=query_vector,
@@ -85,10 +114,10 @@ def query_chroma(query: str, k: int = 2) -> List[str]:
             documents = []
             if results and "documents" in results and results["documents"]:
                 documents = results["documents"][0]
-            logger.info(f"Retrieved {len(documents)} documents using local SentenceTransformer Embeddings.")
+            logger.info(f"Retrieved {len(documents)} documents using active Embeddings provider.")
             return documents
         except Exception as e:
-            logger.error(f"Error querying with SentenceTransformer Embeddings: {e}. Falling back to text search.")
+            logger.error(f"Error querying with Embeddings: {e}. Falling back to text search.")
             
     # Text-matching Fallback (for offline/pure-text run)
     try:

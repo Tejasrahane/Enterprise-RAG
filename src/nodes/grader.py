@@ -1,87 +1,24 @@
 import time
 import logging
 from typing import Dict, Any, List
-from pydantic import BaseModel, Field
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from config.settings import settings
 from config.logger import setup_logger
 from src.state import AgentGraphState
 from src.prompts import GRADER_PROMPT
+from src.agents import (
+    GraderOutput,
+    get_structured_chain,
+    run_heuristic_grader,
+    normalize_relevance
+)
 
 logger = setup_logger("nodes.grader")
 
-class GraderOutput(BaseModel):
-    """Pydantic model representing the relevance grading output."""
-    is_relevant: str = Field(
-        description="Relevance decision. Must be 'yes' or 'no'."
-    )
-    reasoning: str = Field(
-        description="Detailed explanation justifying the decision."
-    )
-
-# Initialize Ollama LLM
-is_ollama_active = True
-grader_chain = None
-
-try:
-    llm = ChatOllama(
-        model=settings.LLM_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
-        temperature=0
-    )
-    grader_chain = llm.with_structured_output(GraderOutput)
-    logger.info(f"Open-source Ollama Grader initialized successfully with model '{settings.LLM_MODEL}'.")
-except Exception as e:
-    logger.error(f"Error initializing Ollama Grader Agent: {e}. Using fallback heuristics.")
-    is_ollama_active = False
-
-def run_heuristic_grader(query: str, docs: List[str]) -> GraderOutput:
-    if not docs:
-        return GraderOutput(is_relevant="no", reasoning="No documents were retrieved.")
-    
-    query_lower = query.lower()
-    combined_docs = "\n".join(docs).lower()
-    
-    financial_terms = {"stock", "price", "revenue", "profit", "earnings", "cost", "financial", "$"}
-    has_financial_query = any(term in query_lower for term in financial_terms)
-    has_financial_docs = any(term in combined_docs for term in financial_terms)
-    
-    if has_financial_query and not has_financial_docs:
-        return GraderOutput(
-            is_relevant="no",
-            reasoning="Query asks for financial metrics (e.g. stock price), but retrieved documents contain only technical specs without financial values."
-        )
-    
-    query_words = set(query_lower.replace("?", "").split())
-    stop_words = {"what", "how", "why", "where", "who", "which", "when", "does", "after", "before", "about", "with", "from", "their", "under", "system"}
-    important_query_words = {w for w in query_words if len(w) > 3 and w not in stop_words}
-    
-    max_overlap = 0
-    for doc in docs:
-        doc_words = set(doc.lower().split())
-        overlap = len(important_query_words & doc_words)
-        if overlap > max_overlap:
-            max_overlap = overlap
-            
-    if max_overlap >= 2:
-        return GraderOutput(
-            is_relevant="yes",
-            reasoning=f"Found significant overlap of key query concepts in retrieved docs (overlap: {max_overlap} terms)."
-        )
-            
-    return GraderOutput(
-        is_relevant="no",
-        reasoning=f"Insufficient overlap of key semantic query terms (max overlap: {max_overlap} terms)."
-    )
-
-def normalize_relevance(decision: str) -> str:
-    d = (decision or "").lower().strip()
-    return "yes" if "yes" in d else "no"
-
 async def grader_node(state: AgentGraphState) -> Dict[str, Any]:
     """
-    Asynchronously grades the relevance of retrieved documents using local open-source LLM.
+    Asynchronously grades the relevance of retrieved documents using Google GenAI (ADK/Gemini)
+    or local open-source LLM with structured output.
     Appends structured telemetry transaction logs.
     """
     start_time = time.time()
@@ -92,7 +29,8 @@ async def grader_node(state: AgentGraphState) -> Dict[str, Any]:
     
     status = "success"
     try:
-        if is_ollama_active and grader_chain is not None:
+        grader_chain = get_structured_chain(GraderOutput)
+        if grader_chain is not None:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", GRADER_PROMPT),
                 ("human", "Query: {query}\n\nDocuments:\n{context}")
@@ -106,7 +44,7 @@ async def grader_node(state: AgentGraphState) -> Dict[str, Any]:
             is_relevant = heuristic_res.is_relevant
             reasoning = f"Heuristic | {heuristic_res.reasoning}"
     except Exception as e:
-        logger.warning(f"Ollama grader failed ({e}). Falling back to heuristics.")
+        logger.warning(f"Grader LLM failed ({e}). Falling back to heuristics.")
         status = "fallback"
         heuristic_res = run_heuristic_grader(query, docs)
         is_relevant = heuristic_res.is_relevant

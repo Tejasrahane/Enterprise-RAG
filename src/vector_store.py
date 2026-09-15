@@ -69,7 +69,8 @@ def get_vector_store():
 
     if CHROMA_AVAILABLE:
         try:
-            embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
+            from src.nodes.retriever import get_embedder
+            embedder = get_embedder()
             client = chromadb.PersistentClient(path=settings.DB_PERSIST_DIR)
             collection = client.get_or_create_collection(name=settings.DB_COLLECTION_NAME)
             
@@ -78,22 +79,34 @@ def get_vector_store():
                 texts = [d.page_content for d in sample_docs]
                 ids = [f"sample_doc_{i}" for i in range(len(sample_docs))]
                 metadatas = [d.metadata for d in sample_docs]
-                embeddings = embedder.encode(texts, convert_to_numpy=True).tolist()
-                collection.upsert(
-                    documents=texts,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
-                    ids=ids
-                )
-            logger.info("ChromaDB vector store successfully created/connected with SentenceTransformer Embeddings.")
+                if embedder:
+                    raw_emb = embedder.encode(texts, convert_to_numpy=True)
+                    embeddings = raw_emb.tolist() if hasattr(raw_emb, "tolist") else raw_emb
+                    collection.upsert(
+                        documents=texts,
+                        embeddings=embeddings,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+                else:
+                    collection.upsert(
+                        documents=texts,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+            logger.info("ChromaDB vector store successfully created/connected with active Embeddings provider.")
             
             class ChromaStoreWrapper:
                 def __init__(self, coll, emb):
                     self.coll = coll
                     self.emb = emb
                 def similarity_search(self, query: str, k: int = 2) -> List[Document]:
-                    q_emb = self.emb.encode([query], convert_to_numpy=True).tolist()
-                    res = self.coll.query(query_embeddings=q_emb, n_results=k)
+                    if self.emb:
+                        raw_q_emb = self.emb.encode([query], convert_to_numpy=True)
+                        q_emb = raw_q_emb.tolist() if hasattr(raw_q_emb, "tolist") else raw_q_emb
+                        res = self.coll.query(query_embeddings=q_emb, n_results=k)
+                    else:
+                        res = self.coll.query(query_texts=[query], n_results=k)
                     docs = []
                     if res and "documents" in res and res["documents"]:
                         for text, meta in zip(res["documents"][0], res["metadatas"][0] if res.get("metadatas") else [{}] * len(res["documents"][0])):
@@ -103,7 +116,7 @@ def get_vector_store():
             _vector_store = ChromaStoreWrapper(collection, embedder)
             return _vector_store
         except Exception as e:
-            logger.error(f"Error initializing ChromaDB with SentenceTransformers: {e}. Falling back to In-Memory store.")
+            logger.error(f"Error initializing ChromaDB with Embeddings: {e}. Falling back to In-Memory store.")
     
     # Fallback to SimpleInMemoryStore
     _vector_store = SimpleInMemoryVectorStore()

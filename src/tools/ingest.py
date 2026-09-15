@@ -5,24 +5,9 @@ import logging
 from typing import List
 from config.settings import settings
 from config.logger import setup_logger
-from src.nodes.retriever import get_chroma_collection
+from src.nodes.retriever import get_chroma_collection, get_embedder
 
 logger = setup_logger("tools.ingest")
-
-_embedder = None
-
-def get_embedder():
-    global _embedder
-    if _embedder is not None:
-        return _embedder
-    try:
-        from sentence_transformers import SentenceTransformer
-        logger.info(f"Loading local SentenceTransformer model: '{settings.EMBEDDING_MODEL}'")
-        _embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
-        return _embedder
-    except Exception as e:
-        logger.error(f"Failed to load SentenceTransformer: {e}")
-        return None
 
 def write_sample_data():
     """Writes default sample specifications to data/raw/ if empty."""
@@ -117,9 +102,10 @@ def ingest_all_documents():
             ids = [f"{filename}_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(chunks))]
             metadatas = [{"source": filename, "chunk_index": i} for i in range(len(chunks))]
             
-            # Embed chunks with open source SentenceTransformer
+            # Embed chunks with active embeddings provider
             if embedder:
-                embeddings = embedder.encode(chunks, convert_to_numpy=True).tolist()
+                raw_emb = embedder.encode(chunks, convert_to_numpy=True)
+                embeddings = raw_emb.tolist() if hasattr(raw_emb, "tolist") else raw_emb
                 collection.upsert(
                     documents=chunks,
                     embeddings=embeddings,

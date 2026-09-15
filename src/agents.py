@@ -1,10 +1,9 @@
 import os
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
-from langchain_ollama import ChatOllama
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -41,29 +40,77 @@ class RewriterOutput(BaseModel):
     )
 
 # ==========================================
-# LLM Initialization with Ollama
+# Dynamic Multi-Provider LLM Initialization (Google GenAI / Ollama)
 # ==========================================
 
-is_llm_active = True
-llm = None
-router_chain = None
-grader_chain = None
-rewriter_chain = None
+_active_llm = None
+_active_provider = None
 
-try:
-    llm = ChatOllama(
-        model=settings.LLM_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
-        temperature=0
-    )
-    router_chain = llm.with_structured_output(RouterOutput)
-    grader_chain = llm.with_structured_output(GraderOutput)
-    rewriter_chain = llm.with_structured_output(RewriterOutput)
-    logger.info(f"Ollama LLM and structured chains initialized successfully with model '{settings.LLM_MODEL}'.")
-except Exception as e:
-    logger.error(f"Error initializing Ollama LLM: {e}. Falling back to heuristic agents.")
-    is_llm_active = False
+def get_llm(temperature: float = 0):
+    """
+    Returns an initialized LangChain Chat model based on configuration.
+    Prioritizes Google GenAI / Gemini (ADK) if configured or keys exist to minimize local server load.
+    Falls back to Ollama or None if offline.
+    """
+    global _active_llm, _active_provider
+    if _active_llm is not None:
+        return _active_llm
 
+    google_api_key = (
+        settings.GOOGLE_API_KEY or 
+        settings.GEMINI_API_KEY or 
+        os.getenv("GOOGLE_API_KEY") or 
+        os.getenv("GEMINI_API_KEY") or 
+        ""
+    ).strip()
+
+    provider = (settings.LLM_PROVIDER or "gemini").lower().strip()
+
+    # Try Google GenAI / Gemini (Zero local server overhead)
+    if (provider == "gemini" and google_api_key) or (google_api_key and provider != "ollama"):
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            _active_llm = ChatGoogleGenerativeAI(
+                model=settings.GEMINI_MODEL,
+                google_api_key=google_api_key,
+                temperature=temperature
+            )
+            _active_provider = "gemini"
+            logger.info(f"Initialized Google GenAI (Gemini) LLM with model '{settings.GEMINI_MODEL}' (Serverless Cloud).")
+            return _active_llm
+        except Exception as e:
+            logger.warning(f"Could not initialize Google GenAI LLM: {e}. Attempting Ollama fallback.")
+    elif provider == "gemini" and not google_api_key:
+        logger.info("Google GenAI provider selected, but no GOOGLE_API_KEY/GEMINI_API_KEY found in .env. Falling back to local Ollama or heuristics.")
+
+    # Try Local Ollama (with responsive timeout to prevent blocking when daemon is offline)
+    try:
+        from langchain_ollama import ChatOllama
+        _active_llm = ChatOllama(
+            model=settings.LLM_MODEL,
+            base_url=settings.OLLAMA_BASE_URL,
+            temperature=temperature,
+            timeout=5.0
+        )
+        _active_provider = "ollama"
+        logger.info(f"Initialized Ollama LLM with model '{settings.LLM_MODEL}' at {settings.OLLAMA_BASE_URL}.")
+        return _active_llm
+    except Exception as e:
+        logger.warning(f"Could not initialize Ollama LLM: {e}. Using heuristic fallbacks.")
+        _active_llm = None
+        _active_provider = "heuristic"
+        return None
+
+def get_structured_chain(schema):
+    """Creates a structured output chain for the given schema on the active LLM."""
+    llm_instance = get_llm()
+    if llm_instance is None:
+        return None
+    try:
+        return llm_instance.with_structured_output(schema)
+    except Exception as e:
+        logger.warning(f"Failed to create structured output chain for {schema.__name__}: {e}")
+        return None
 
 # ==========================================
 # Heuristic Fallback Agents
@@ -167,7 +214,7 @@ def run_heuristic_generator(query: str, docs: List[str]) -> str:
             return ("Based on Project Aetheris technical specifications, the quantum CPU utilizes a 128-qubit "
                     "topological architecture operating at 15 millikelvin. In June 2026, it achieved a quantum volume of 2^24.")
     if "xyz" in query.lower():
-        if "$4.2 billion" in combined_docs or "4.2B" in combined_docs or "cloud ai" in combined_docs:
+        if "$4.2 billion" in combined_docs or "4.2b" in combined_docs or "cloud ai" in combined_docs:
             return ("Based on Company XYZ's Q2 2026 financial report, they recorded a net profit of $4.2 billion, "
                     "which represents a major growth driver stemming from a 45% year-over-year increase in cloud AI infrastructure sales.")
     if "nova-9" in query.lower() or "nova 9" in query.lower() or "stellarex" in query.lower():
@@ -182,7 +229,8 @@ def run_heuristic_generator(query: str, docs: List[str]) -> str:
 # ==========================================
 
 def call_router(query: str) -> RouterOutput:
-    if is_llm_active and router_chain is not None:
+    router_chain = get_structured_chain(RouterOutput)
+    if router_chain is not None:
         try:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an AI router agent. Analyze the user query and decide where it should go.\n"
@@ -201,7 +249,8 @@ def call_router(query: str) -> RouterOutput:
     return run_heuristic_router(query)
 
 def call_grader(query: str, documents: List[str]) -> GraderOutput:
-    if is_llm_active and grader_chain is not None:
+    grader_chain = get_structured_chain(GraderOutput)
+    if grader_chain is not None:
         try:
             context = "\n\n".join(documents)
             prompt = ChatPromptTemplate.from_messages([
@@ -221,7 +270,8 @@ def call_grader(query: str, documents: List[str]) -> GraderOutput:
     return run_heuristic_grader(query, documents)
 
 def call_rewriter(query: str) -> RewriterOutput:
-    if is_llm_active and rewriter_chain is not None:
+    rewriter_chain = get_structured_chain(RewriterOutput)
+    if rewriter_chain is not None:
         try:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are a query rewriting agent. Your goal is to optimize the search query to improve vector database lookup.\n"
@@ -240,7 +290,8 @@ def call_rewriter(query: str) -> RewriterOutput:
     return run_heuristic_rewriter(query)
 
 def call_generator(query: str, documents: List[str]) -> str:
-    if is_llm_active and llm is not None:
+    llm = get_llm()
+    if llm is not None:
         try:
             context = "\n\n".join(documents)
             prompt = ChatPromptTemplate.from_messages([

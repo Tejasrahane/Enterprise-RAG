@@ -1,9 +1,10 @@
 # ⚡ Enterprise Async Agentic RAG System
-> **100% Free, Open-Source, and Self-Hosted Retrieval-Augmented Generation Architecture**
+> **High-Performance Retrieval-Augmented Generation Architecture powered by Google GenAI / ADK (Gemini) & Local Ollama**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.65-FF6F00.svg?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Google Gemini](https://img.shields.io/badge/Google%20GenAI-Gemini%201.5%2F2.0-4285F4.svg?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg?logo=ollama&logoColor=white)](https://ollama.com/)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector%20Store-purple.svg)](https://www.trychroma.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -12,9 +13,11 @@
 
 ## 📖 Overview
 
-This project is an **Enterprise-Grade Asynchronous Agentic RAG (Retrieval-Augmented Generation)** service engineered with **100% Free and Open-Source software**. It utilizes **LangGraph** to build self-correcting agentic workflows with iterative query rewriting, relevance grading, grounded answer generation, real-time open web search fallback, and comprehensive telemetry metrics.
+This project is an **Enterprise-Grade Asynchronous Agentic RAG (Retrieval-Augmented Generation)** service engineered with **LangGraph** and a **Dual-Provider Architecture**:
+1. **Google GenAI / ADK (Gemini)**: Offloads inference and embeddings completely to Google's ultra-fast cloud infrastructure, eliminating heavy server dependencies (zero GPU/VRAM or heavy local server requirements).
+2. **Local Ollama & SentenceTransformers**: Provides 100% self-hosted, private offline execution when required.
 
-**Zero paid API subscriptions or proprietary keys are required.**
+The system builds self-correcting agentic workflows with iterative query rewriting, relevance grading, grounded answer generation, real-time open web search fallback, and comprehensive telemetry metrics.
 
 ### 🏛️ System Architecture & Working Flow
 
@@ -22,7 +25,7 @@ This project is an **Enterprise-Grade Asynchronous Agentic RAG (Retrieval-Augmen
 
 ```mermaid
 flowchart TD
-    Start([User Input Query]) --> Router{Agentic Router}
+    Start([User Input Query]) --> Router{Agentic Router: Google GenAI / Ollama}
     
     %% Direct Conversation
     Router -->|Direct Greeting / Casual| Direct[Direct Response Node]
@@ -51,13 +54,16 @@ flowchart TD
 
 ## ✨ Key Highlights & Features
 
-- 🆓 **100% Free & Open-Source Stack**:
-  - **LLM Engine**: Local execution via [Ollama](https://ollama.com/) (`llama3.2:latest`, `qwen2.5:7b`, `mistral`, etc.) with `langchain-ollama`.
-  - **Dense Embeddings**: Local [SentenceTransformers](https://www.sbert.net/) (`all-MiniLM-L6-v2`) generating 384-dimensional dense vectors with zero token cost.
+- 🌐 **Decreased Server Dependency via Google GenAI / ADK**:
+  - **Serverless Cloud LLM**: Use Google Gemini (`gemini-1.5-flash`, `gemini-2.0-flash`) via `langchain-google-genai` and `google-genai` to offload compute with zero local GPU/RAM footprint.
+  - **Cloud Embeddings Option**: Seamlessly switch between Google GenAI embeddings (`models/text-embedding-004`) and local SentenceTransformers.
+- 🆓 **Flexible Multi-Provider & Self-Hosted Fallback**:
+  - **Local LLM Engine**: Local execution via [Ollama](https://ollama.com/) (`llama3.2:latest`, `qwen2.5:7b`, `mistral`, etc.).
+  - **Dense Embeddings**: Local [SentenceTransformers](https://www.sbert.net/) (`all-MiniLM-L6-v2`) or ChromaDB default embeddings.
   - **Vector Database**: [ChromaDB](https://www.trychroma.com/) with native local persistence and Docker support.
   - **Free Web Search**: [DuckDuckGo Search](https://duckduckgo.com/) (`ddgs`) and [Wikipedia](https://www.wikipedia.org/) search integration.
 - 🔄 **Self-Correcting Agentic Loops**:
-  - Automatically evaluates retrieved document relevance using a structured grading agent.
+  - Automatically evaluates retrieved document relevance using structured grading schemas.
   - Dynamically rewrites semantic search queries if relevance thresholds fail.
   - Escalates to live open web search when internal retrieval iterations exceed configured limits.
 - ⚡ **Asynchronous FastAPI Serving Layer**:
@@ -65,7 +71,7 @@ flowchart TD
   - Full request-response JSON endpoint (`/api/v1/chat/query`).
   - Real-time Server-Sent Events (SSE) streaming endpoint (`/api/v1/chat/stream`).
 - 🛡️ **Guaranteed Uptime & Heuristic Fallbacks**:
-  - Includes offline rule-based semantic classification and text matching in case the local LLM daemon is offline.
+  - Includes offline rule-based semantic classification and text matching in case external services or local LLM daemons are unreachable.
 - 📊 **Telemetry & Tracing**:
   - Emits latency, execution timestamps, route targets, and node metadata in every query transaction.
 
@@ -113,12 +119,11 @@ new project .1/
 ### 1. Prerequisites
 
 - **Python 3.10+**
-- **Ollama** installed and running on your system ([Download Ollama](https://ollama.com/download)).
-
-Pull your preferred open-source model:
-```bash
-ollama pull llama3.2
-```
+- **Option A (Google GenAI / Zero Local Server Load)**:
+  - Obtain a free API Key from [Google AI Studio](https://aistudio.google.com/).
+  - Set `GOOGLE_API_KEY=your_key` in `.env`.
+- **Option B (Local Ollama / Self-Hosted)**:
+  - Install [Ollama](https://ollama.com/download) and pull `ollama pull llama3.2`.
 
 ---
 
@@ -149,14 +154,24 @@ ollama pull llama3.2
 
 ### 3. Environment Configuration
 
-Copy the `.env.example` template into `.env` (already pre-configured for local execution):
+Copy the `.env.example` template into `.env`:
 ```ini
-# Ollama Local LLM Server Endpoint & Model
+# LLM Provider Selection: 'gemini' (cloud/serverless) or 'ollama' (local self-hosted)
+LLM_PROVIDER=gemini
+
+# Google GenAI / ADK (Gemini API Key from https://aistudio.google.com/)
+GOOGLE_API_KEY=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-1.5-flash
+
+# Embeddings Provider: 'local' (SentenceTransformers) or 'gemini' (Google GenAI)
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+GEMINI_EMBEDDING_MODEL=models/text-embedding-004
+
+# Ollama Local LLM Server Endpoint & Model (Used if LLM_PROVIDER=ollama or as fallback)
 OLLAMA_BASE_URL=http://localhost:11434
 LLM_MODEL=llama3.2:latest
-
-# Open-Source Embeddings Model (SentenceTransformers)
-EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 # Free Web Search Engine (duckduckgo)
 SEARCH_ENGINE=duckduckgo
@@ -320,12 +335,17 @@ The ChromaDB service will run on `http://localhost:8000` with volume persistence
 
 ## 🛠️ Customization & Model Swapping
 
-You can change models on the fly by updating `.env` or setting environment variables:
+You can change models and providers on the fly by updating `.env` or setting environment variables:
 
 | Setting | Options | Description |
 | :--- | :--- | :--- |
-| `LLM_MODEL` | `llama3.2:latest`, `qwen2.5:7b`, `qwen2.5-coder:latest`, `mistral:latest` | Local LLM model served by Ollama |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`, `nomic-embed-text` | SentenceTransformer model |
+| `LLM_PROVIDER` | `gemini`, `ollama` | Primary LLM Provider (`gemini` eliminates local server load) |
+| `GOOGLE_API_KEY` | `AIzaSy...` | Free API key from Google AI Studio |
+| `GEMINI_MODEL` | `gemini-1.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro` | Cloud model served by Google GenAI / ADK |
+| `LLM_MODEL` | `llama3.2:latest`, `qwen2.5:7b`, `mistral:latest` | Local LLM model served by Ollama |
+| `EMBEDDING_PROVIDER`| `local`, `gemini` | Embeddings provider (`gemini` offloads embeddings to Google) |
+| `GEMINI_EMBEDDING_MODEL`| `models/text-embedding-004` | Google GenAI cloud embeddings model |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5` | SentenceTransformer local model |
 | `MAX_REWRITE_LOOPS`| `1` - `5` (Default: `3`) | Max self-correction retrieval loops before web fallback |
 | `SEARCH_ENGINE` | `duckduckgo`, `wikipedia` | Primary free web search provider |
 

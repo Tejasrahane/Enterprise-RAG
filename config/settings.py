@@ -2,12 +2,22 @@ import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ProjectSettings(BaseSettings):
+    # LLM Provider Configuration ("gemini" or "ollama")
+    LLM_PROVIDER: str = "gemini"
+
+    # Google GenAI / ADK (Gemini) Configuration
+    GOOGLE_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    
     # Open-Source Local LLM Configuration (Ollama)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLM_MODEL: str = "llama3.2:latest"
     
-    # Open-Source Local Embeddings (SentenceTransformers / HuggingFace)
+    # Embeddings Configuration ("local" for SentenceTransformers, "gemini" for Google GenAI)
+    EMBEDDING_PROVIDER: str = "local"
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    GEMINI_EMBEDDING_MODEL: str = "models/text-embedding-004"
     
     # Free Open-Source Search Configuration
     SEARCH_ENGINE: str = "duckduckgo"

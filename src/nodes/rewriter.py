@@ -1,60 +1,23 @@
 import time
 import logging
 from typing import Dict, Any
-from pydantic import BaseModel, Field
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from config.settings import settings
 from config.logger import setup_logger
 from src.state import AgentGraphState
 from src.prompts import REWRITER_PROMPT
+from src.agents import (
+    RewriterOutput,
+    get_structured_chain,
+    run_heuristic_rewriter
+)
 
 logger = setup_logger("nodes.rewriter")
 
-class RewriterOutput(BaseModel):
-    """Pydantic model representing the optimized query output."""
-    rewritten_query: str = Field(
-        description="The optimized, search-engine friendly query."
-    )
-    reasoning: str = Field(
-        description="Explanation behind the rewriting modifications."
-    )
-
-# Initialize Ollama LLM
-is_ollama_active = True
-rewriter_chain = None
-
-try:
-    llm = ChatOllama(
-        model=settings.LLM_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
-        temperature=0
-    )
-    rewriter_chain = llm.with_structured_output(RewriterOutput)
-    logger.info(f"Open-source Ollama Rewriter initialized successfully with model '{settings.LLM_MODEL}'.")
-except Exception as e:
-    logger.error(f"Error initializing Ollama Rewriter Agent: {e}. Using fallback heuristics.")
-    is_ollama_active = False
-
-def run_heuristic_rewriter(query: str) -> RewriterOutput:
-    rewritten = query
-    if "xyz" in query.lower() and "q2" in query.lower() and "profit" not in query.lower():
-        rewritten = "Company XYZ record net profit Q2 2026 performance"
-    elif "aetheris" in query.lower() and "qubit" not in query.lower():
-        rewritten = "Project Aetheris quantum CPU qubit specification and architecture"
-    elif "nova-9" in query.lower() and "impulse" not in query.lower():
-        rewritten = "Nova-9 Stellarex propulsion system impulse and fuel spec"
-    else:
-        rewritten = f"{query} details specifications"
-        
-    return RewriterOutput(
-        rewritten_query=rewritten,
-        reasoning=f"Refined query from '{query}' to focus on specific retrieval keywords: '{rewritten}'."
-    )
-
 async def rewriter_node(state: AgentGraphState) -> Dict[str, Any]:
     """
-    Asynchronously optimizes user search queries to improve retriever hits using local open-source LLM.
+    Asynchronously optimizes user search queries to improve retriever hits using Google GenAI (ADK/Gemini)
+    or local open-source LLM.
     Appends structured telemetry transaction logs.
     """
     start_time = time.time()
@@ -65,7 +28,8 @@ async def rewriter_node(state: AgentGraphState) -> Dict[str, Any]:
     
     status = "success"
     try:
-        if is_ollama_active and rewriter_chain is not None:
+        rewriter_chain = get_structured_chain(RewriterOutput)
+        if rewriter_chain is not None:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", REWRITER_PROMPT),
                 ("human", "Original Query: {query}")
@@ -78,7 +42,7 @@ async def rewriter_node(state: AgentGraphState) -> Dict[str, Any]:
             rewritten_query = heuristic_res.rewritten_query
             reasoning = f"Heuristic | {heuristic_res.reasoning}"
     except Exception as e:
-        logger.warning(f"Ollama rewriter failed ({e}). Falling back to heuristics.")
+        logger.warning(f"Rewriter LLM failed ({e}). Falling back to heuristics.")
         status = "fallback"
         heuristic_res = run_heuristic_rewriter(query)
         rewritten_query = heuristic_res.rewritten_query
